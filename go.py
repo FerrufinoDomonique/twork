@@ -5,6 +5,7 @@ from vendor.wpbot import wp_bot  # 导入 wp_bot
 import asyncio
 import time
 import re
+
 from telethon.tl.types import InputMessagesFilterEmpty, Message, User, Chat, Channel, MessageMediaWebPage
 
 # 检查是否在本地开发环境中运行
@@ -101,6 +102,7 @@ async def main():
             if isinstance(entity, Channel) or isinstance(entity, Chat):
                 entity_title = entity.title
             elif isinstance(entity, User):
+               
                 entity_title = f'{entity.first_name or ""} {entity.last_name or ""}'.strip()
             else:
                 entity_title = f'Unknown entity {entity.id}'
@@ -109,6 +111,8 @@ async def main():
 
             if dialog.unread_count > 0 and (dialog.is_group or dialog.is_channel or dialog.is_user):
                 count_per_chat=0
+
+               
                 
 
                 time.sleep(0.5)  # 每次请求之间等待0.5秒
@@ -121,21 +125,36 @@ async def main():
 
 
                 
-                print(f"\r\n>Reading messages from entity {entity.id}/{entity_title} - {last_read_message_id}\n", flush=True)
+                print(f"\r\n>Reading messages from entity {entity.id}/{entity_title} - {last_read_message_id} - U:{dialog.unread_count} \n", flush=True)
                 async for message in client.iter_messages(entity, min_id=last_read_message_id, limit=50, reverse=True, filter=InputMessagesFilterEmpty()):
                     NEXT_MESSAGE = False
                    
                     if message.id <= last_read_message_id:
                         continue
                    
-                    
-                        
-
                     last_message_id = message.id  # 初始化 last_message_id
                    
-                    
                     if message.media and not isinstance(message.media, MessageMediaWebPage):
                        
+
+                        if dialog.is_user:
+                                                    # 使用正则表达式进行匹配，忽略大小写
+                            try:
+                                match = re.search(r'\|_forward_\|\s*(.*?)\s*(bot)', message.message, re.IGNORECASE)
+                                if match:
+                                    botname = match.group(1) + match.group(2)  # 直接拼接捕获的组
+                                    print(f"Forward:{botname}")
+                                    await tgbot.client.send_message(botname, message)
+                            except Exception as e:
+                                print(f"Error kicking bot: {e}", flush=True)
+                                
+                            finally:
+                                NEXT_MESSAGE = True
+
+
+                            await tgbot.send_video_to_filetobot_and_send_to_qing_bot(client,message)
+                            
+
                         if tgbot.config['warehouse_chat_id']!=0 and entity.id != tgbot.config['work_chat_id'] and entity.id != tgbot.config['warehouse_chat_id']:
                             
                             if media_count >= max_media_count:
@@ -147,6 +166,9 @@ async def main():
                                 break
 
                             last_message_id = await tgbot.forward_media_to_warehouse(client,message)
+                            
+                            # print(f"\r\n@>{dialog}", flush=True)
+
                             
                             
                             # print(f"last_message_id: {last_message_id}")
@@ -160,22 +182,28 @@ async def main():
                                 print(f"skipping work_chat\n", flush=True)
                             elif entity.id == tgbot.config['warehouse_chat_id']:
                                 print(f"skipping warehouse\n", flush=True)
+                               
 
                                 
                            
 
                     elif message.text:
                        
-                        if message.text.startswith("|_kick_|"):
-                            try:
-                                botname = message.text[len("|_kick_|"):]
-                               
+                        # 使用正则表达式进行匹配，忽略大小写
+                        try:
+                            match = re.search(r'\|_kick_\|\s*(.*?)\s*(bot)', message.text, re.IGNORECASE)
+                            if match:
+                                botname = match.group(1) + match.group(2)  # 直接拼接捕获的组
+                                print(f"Kick:{botname}")
                                 await tgbot.client.send_message(botname, "/start")
-                            except Exception as e:
-                                print(f"Error kicking bot: {e}", flush=True)
+                        except Exception as e:
+                            print(f"Error kicking bot: {e}", flush=True)
                             
-                            finally:
-                                NEXT_MESSAGE = True
+                        finally:
+                            NEXT_MESSAGE = True
+
+
+
                                 
                                
 
@@ -275,7 +303,7 @@ async def main():
 
 
 
-        print("\nExecution time is " + str(elapsed_time) + f" seconds. Continuing next cycle... after {max_break_time} seconds.\n", flush=True)
+        print("\nExecution time is " + str(elapsed_time) + f" seconds. Continuing next cycle... after {max_break_time} seconds.\n\n", flush=True)
         await asyncio.sleep(max_break_time)  # 间隔180秒
         media_count = 0
 

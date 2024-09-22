@@ -175,6 +175,34 @@ class LYClass:
                 await publicbot_conv.send_file(filetobot_response.media, caption=caption_text)
                 print(">>>>Forwarded filetobot response to publish bot with caption.")
 
+    async def send_video_to_filetobot_and_send_to_qing_bot(self, client, video):
+        print(">>>>Sending video to filetobot and forwarding to qing bot.")
+        # original_message_id = original_message.id
+
+        # 将视频发送到 filetobot 并等待响应
+        async with client.conversation('filetobot') as filetobot_conv:
+            filetobot_message = await filetobot_conv.send_file(video)
+            try:
+                # 持续监听，直到接收到媒体文件
+                while True:
+                    filetobot_response = await asyncio.wait_for(filetobot_conv.get_response(filetobot_message.id), timeout=30)
+                    if filetobot_response.media:
+                        break
+                    else:
+                        print(">>>Received text response, waiting for media...")
+
+            except asyncio.TimeoutError:
+                # await client.send_message(self.config['work_chat_id'], "filetobot timeout", reply_to=original_message_id)
+                print("filetobot response timeout.")
+                return
+
+            # 将 filetobot 的响应内容传送给 public_bot_id，并设置 caption 为原始消息的文本
+            async with client.conversation(self.config['work_bot_id']) as publicbot_conv:
+                # caption_text = "|_SendToBeach_|\n"+original_message.text+"\n"+filetobot_response.message
+                await publicbot_conv.send_file(filetobot_response.media, caption=filetobot_response.message)
+                print(">>>>Forwarded filetobot response to qing bot with caption.")
+
+
     async def wpbot(self, client, message, bot_username):
         try:
             chat_id = self.config['work_chat_id']
@@ -182,7 +210,8 @@ class LYClass:
                 # 根据bot_username 找到 wp_bot 中对应的 bot_name = bot_username 的字典
                 bot = next((bot for bot in wp_bot if bot['bot_name'] == bot_username), None)
                 if bot['mode'] == 'link':
-                    message.text = '/start ' + message.text
+                    match = re.search(r"(?i)start=([a-zA-Z0-9_]+)", message.text)
+                    message.text = '/start ' + match.group(1)
 
                 # 发送消息到机器人
                 forwarded_message = await conv.send_message(message.text)
@@ -313,11 +342,11 @@ class LYClass:
                     if isinstance(message.media, types.MessageMediaDocument):
                         if not any(isinstance(attr, types.DocumentAttributeSticker) for attr in message.media.document.attributes):
                             # 排除贴图
-                            print(f"Forwarding document to warehouse chat: {message.id}\n")
+                            print(f">>>Forwarding document to warehouse chat: {message.id}\n")
                             last_message_id = await self.send_message(client, message)
                             if_send=True
                     elif isinstance(message.media, types.MessageMediaPhoto):
-                        print(f"Forwarding photo to warehouse chat: {message.id}\n")
+                        print(f">>>Forwarding photo to warehouse chat: {message.id}\n")
                         last_message_id = await self.send_message(client, message)
                         if_send=True
                     
