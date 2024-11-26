@@ -1,3 +1,6 @@
+from telethon import errors
+
+import json
 from telethon import TelegramClient, sync
 import os
 from vendor.class_bot import LYClass  # 导入 LYClass
@@ -31,10 +34,13 @@ try:
         'session_name': os.getenv('API_ID') + 'session_name',
         'work_bot_id': os.getenv('WORK_BOT_ID'),
         'work_chat_id': int(os.getenv('WORK_CHAT_ID', 0)),  # 默认值为0
+        'media_work_chat_id': int(os.getenv('MEDIA_WORK_CHAT_ID', 0)),  # 默认值为0
         'public_bot_id': os.getenv('PUBLIC_BOT_ID'),
         'warehouse_chat_id': int(os.getenv('WAREHOUSE_CHAT_ID', 0)),  # 默认值为0
         'link_chat_id': int(os.getenv('LINK_CHAT_ID', 0)),
         'key_word': os.getenv('KEY_WORD'),
+        'setting_chat_id': int(os.getenv('SETTING_CHAT_ID'),0),
+        'setting_tread_id': int(os.getenv('SETTING_THREAD_ID'),0),
         'show_caption': os.getenv('SHOW_CAPTION')
     }
 
@@ -52,7 +58,48 @@ max_media_count = 55  # 10个媒体文件
 max_count_per_chat = 11  # 每个对话的最大消息数
 max_break_time = 90  # 休息时间
 
+async def process_chats(client, data):
+    last_read_message_content = data["last_read_message_content"]
+    last_read_message_content2 = data["last_read_message_content"]
+    blacklist = data["blacklist"]
 
+    # 用于存储需要删除的 chat_id
+    to_remove = []
+
+    # 遍历 last_read_message_content
+    for chat_id, message_id in last_read_message_content.copy().items():
+        try:
+            # 检查 chat_id 是否有效
+            entity = await client.get_entity(int(chat_id))  # 获取 chat_id 的实体
+            print(f"Chat ID {chat_id} exists. Entity: {entity.title if hasattr(entity, 'title') else 'User'}")
+        
+        except errors.RPCError as e:
+            # 若 chat_id 不存在，记录下来
+            print(f"Chat ID {chat_id} does not exist or user is not in it. Error: {e}")
+           
+            last_read_message_content.pop(chat_id, None)
+            data["last_read_message_content"] = last_read_message_content
+            continue  # 继续处理下一个 chat_id 
+
+        except ValueError:
+            # 若 chat_id 无效（非数字或解析失败）
+            print(f"Chat ID {chat_id} is invalid.")
+            to_remove.append(chat_id)
+            last_read_message_content.pop(chat_id, None)
+            data["last_read_message_content"] = last_read_message_content
+            
+            continue  # 继续处理下一个 chat_id  
+
+    try:
+        config_str2 = json.dumps(data, indent=2)  # 转换为 JSON 字符串
+        async with client.conversation(tgbot.config['setting_chat_id']) as conv:
+            await conv.send_message(config_str2, reply_to=tgbot.config['setting_tread_id'])
+    except Exception as e:
+        print(f"Error sending message to setting_chat_id: {e}", flush=True)
+
+    # 更新 JSON 数据
+    data["last_read_message_content"] = last_read_message_content
+    return data
 
 async def main():
     await client.start(phone_number)
@@ -65,6 +112,12 @@ async def main():
         print(f"Error sending message to work_bot_id: {e}", flush=True)
         return
     
+    setting_chat_id = tgbot.config['setting_chat_id']
+    
+    tgbot.setting = await tgbot.load_tg_setting(setting_chat_id, tgbot.config['setting_tread_id'])
+    
+    # tgbot.setting = await process_chats(client, tgbot.setting)
+    # print("Updated JSON:", tgbot.setting)
 
     while True:
         NEXT_CYCLE = False
@@ -86,12 +139,18 @@ async def main():
                 continue
 
             # 设一个黑名单列表，如果 entity.id 在黑名单列表中，则跳过 
-            blacklist = [2131062766, 1766929647, 1781549078, 6701952909, 6366395646,93372553,2197546676]  # Example blacklist with entity IDs
-            # blacklist = [2154650877,2190384328,2098764817,1647589965,1731239234,1877274724,2131062766, 1766929647, 1781549078, 6701952909, 6366395646,93372553,2215190216,2239552986,2215190216,2171778803,1704752058]
 
-            enclist = [2012816724,2239552986,2215190216,7061290326,2175483382,2252083262] 
+            # 若setting中有blacklist，则使用setting中的blacklist
 
-            skip_vaildate_list =[2201450328]
+
+
+            # 如果 tgbot.setting 不存在，使用空字典作为默认值
+            blacklist = (tgbot.setting or {}).get('blacklist', [])
+            
+
+            enclist = []
+
+            skip_vaildate_list =[]
 
             if entity.id in blacklist:
                 NEXT_DIALOGS = True
@@ -113,19 +172,13 @@ async def main():
             if dialog.unread_count > 0 and (dialog.is_group or dialog.is_channel or dialog.is_user):
                 count_per_chat=0
 
-               
-                
-
                 time.sleep(0.5)  # 每次请求之间等待0.5秒
 
                 # if entity.id == tgbot.config['work_chat_id']:
                 #     last_read_message_id = 14244
                 # else:
                 last_read_message_id = tgbot.load_last_read_message_id(entity.id)
-                
-
-
-                
+                          
                 print(f"\r\n>Reading messages from entity {entity.id}/{entity_title} - {last_read_message_id} - U:{dialog.unread_count} \n", flush=True)
                 async for message in client.iter_messages(entity, min_id=last_read_message_id, limit=50, reverse=True, filter=InputMessagesFilterEmpty()):
                     NEXT_MESSAGE = False
@@ -135,6 +188,7 @@ async def main():
                    
                     last_message_id = message.id  # 初始化 last_message_id
                    
+                    ##### 当前消息是媒体文件，且不是网页 #####
                     if message.media and not isinstance(message.media, MessageMediaWebPage):
                         if dialog.is_user:
                             # 使用正则表达式进行匹配，忽略大小写
@@ -147,8 +201,13 @@ async def main():
                                     print(f"Captured string: {captured_str}")
                                     
                                     # 判断是否为数字
-                                    if captured_str.isdigit():
+                                    if tgbot.is_number(captured_str):
                                         print(f"Forward to number: {captured_str}")
+                                        #如何captured_str是-100开头，则拿掉-100，再转成整数发送
+                                        if captured_str.startswith('-100'):
+                                            captured_str = captured_str.replace('-100','')
+                                        
+                                        message.text = ''
                                         await tgbot.client.send_message(int(captured_str), message)  # 如果是数字，转成整数发送
                                     else:
                                         print(f"Forward to bot: {captured_str}")
@@ -165,9 +224,35 @@ async def main():
 
 
                             
+                        if entity.id == tgbot.config['media_work_chat_id']:    
+                            if media_count >= max_media_count:
+                                NEXT_CYCLE = True
+                                break
                             
+                            if count_per_chat >= max_count_per_chat:
+                                NEXT_DIALOGS = True
+                                break
 
-                        if tgbot.config['warehouse_chat_id']!=0 and entity.id != tgbot.config['work_chat_id'] and entity.id != tgbot.config['warehouse_chat_id']:
+
+                            await tgbot.forward_media_to_tlgur(client,message)
+
+                            # print(f"last_message_id: {last_message_id}")
+                            media_count = media_count + 1
+                            count_per_chat = count_per_chat +1
+                            last_read_message_id = last_message_id
+
+                        elif entity.id == 827297596:
+                            print(f"{entity.id} \n", flush=True)
+                            async with client.conversation(1808436284) as conv:
+                                photo = message.media.photo
+                                
+                                forwarded_message = await conv.send_file(photo)
+                                print(f"forwarded_message: {message} {message.id}")
+                                await client.delete_messages(entity.id, message.id)
+                             
+
+
+                        elif tgbot.config['warehouse_chat_id']!=0 and entity.id != tgbot.config['work_chat_id'] and entity.id != tgbot.config['warehouse_chat_id']:
                             
                             if media_count >= max_media_count:
                                 NEXT_CYCLE = True
@@ -236,13 +321,10 @@ async def main():
                                         print(f"Failed to join channel from link: {match_str}", flush=True)
                                         NEXT_DIALOGS = True
                                         break
-
-                                  
-
                                 else:
                                     # print(f"'{message.text}' ->matches: {match_str}  {entity.id} {tgbot.config['link_chat_id']}. =>forward\n")
-                                   
-                                    await client.send_message(tgbot.config['work_bot_id'], f"{match_str}")  
+                                    if match_str not in ['https://t.me/FilesDrive_BLGA_bot']:
+                                        await client.send_message(tgbot.config['work_bot_id'], f"{match_str}")  
                             # print(f"matches: 178\n")
                                
                                      
@@ -256,9 +338,23 @@ async def main():
                                 break
 
 
-                            await tgbot.process_by_check_text(message,'tobot')
-                            media_count = media_count + 1
-                            count_per_chat = count_per_chat +1
+                            query = await tgbot.process_by_check_text(message, 'query')
+                            if query:
+                                for bot_result in query['results']:
+                                    if isinstance(bot_result, dict):
+                                        if(bot_result['title'] == 'salai'):
+                                            
+                                            await tgbot.client.delete_messages(
+                                                entity=entity.id,  # 对话的 chat_id
+                                                message_ids=message.id  # 刚刚发送消息的 ID
+                                            )
+
+
+                                        else:
+                                            await tgbot.process_by_check_text(message, 'tobot')
+                                            media_count += 1
+                                            count_per_chat += 1
+
                         elif dialog.is_group or dialog.is_channel:
                         
                             if entity.id in enclist:
@@ -299,8 +395,9 @@ async def main():
                                     await tgbot.process_by_check_text(message,'encstr')
                         elif dialog.is_user:
                             if '|_request_|' in message.text:
-
                                 await tgbot.process_by_check_text(message,'request')
+                            elif '|_sendToWZ_|' in message.text:
+                                await tgbot.process_by_check_text(message,'sendToWZ')
                             else:
                                 await tgbot.process_by_check_text(message,'encstr')
                             
@@ -332,6 +429,10 @@ async def main():
         
 
 
+
+        config_str2 = json.dumps(tgbot.setting, indent=2)  # 转换为 JSON 字符串
+        async with client.conversation(tgbot.config['setting_chat_id']) as conv:
+            await conv.send_message(config_str2, reply_to=tgbot.config['setting_tread_id'])
 
         print("\nExecution time is " + str(int(elapsed_time)) + f" seconds. Continuing next cycle... after {max_break_time} seconds.\n\n", flush=True)
         print(f"-\n", flush=True)
