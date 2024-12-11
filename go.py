@@ -180,7 +180,7 @@ async def main():
                 last_read_message_id = tgbot.load_last_read_message_id(entity.id)
                           
                 print(f"\r\n>Reading messages from entity {entity.id}/{entity_title} - {last_read_message_id} - U:{dialog.unread_count} \n", flush=True)
-                async for message in client.iter_messages(entity, min_id=last_read_message_id, limit=50, reverse=True, filter=InputMessagesFilterEmpty()):
+                async for message in client.iter_messages(entity, min_id=last_read_message_id, limit=500, reverse=True, filter=InputMessagesFilterEmpty()):
                     NEXT_MESSAGE = False
                     #如果 message.message 是 "doc+vzvd_WpvvhUc0tI+2wYG_RQAAsU=_mda"，则跳过
                     if message.message == "doc+vzvd_WpvvhUc0tI+2wYG_RQAAsU=_mda":
